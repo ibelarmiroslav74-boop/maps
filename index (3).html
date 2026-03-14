@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<title>WorldMap</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+:root {
+  --glass:        rgba(255,255,255,0.75);
+  --glass-strong: rgba(255,255,255,0.92);
+  --glass-border: rgba(255,255,255,0.6);
+  --blur:         blur(22px) saturate(180%);
+  --shadow:       0 4px 24px rgba(0,0,0,0.11), 0 1px 4px rgba(0,0,0,0.06);
+  --shadow-lg:    0 10px 48px rgba(0,0,0,0.16);
+  --accent:       #1a73e8;
+  --accent-soft:  rgba(26,115,232,0.1);
+  --text:         #1c1e22;
+  --muted:        #7b8494;
+  --divider:      rgba(0,0,0,0.07);
+  --r:            14px;
+  --r-sm:         10px;
+  --panel-w:      360px;
+}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box;}
+html,body{width:100%;height:100%;font-family:'Inter',-apple-system,sans-serif;overflow:hidden;-webkit-font-smoothing:antialiased;}
+
+/* ── MAP ── */
+#map{position:fixed;inset:0;z-index:0;transition:right .35s ease;}
+body.panel-open #map{right:var(--panel-w);}
+
+/* ── TOPBAR ── */
+.topbar{
+  position:fixed;top:14px;left:50%;transform:translateX(-50%);
+  z-index:1000;display:flex;align-items:flex-start;gap:9px;
+  pointer-events:none;width:min(580px,calc(100vw - 76px));
+}
+.logo{
+  pointer-events:all;
+  background:var(--glass);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  border:1px solid var(--glass-border);border-radius:var(--r);box-shadow:var(--shadow);
+  padding:0 15px;height:46px;display:flex;align-items:center;gap:8px;
+  flex-shrink:0;user-select:none;cursor:default;
+}
+.logo svg{width:17px;height:17px;color:var(--accent);}
+.logo span{font-size:.88rem;font-weight:700;color:var(--text);letter-spacing:-.02em;}
+
+/* search container — relative so dropdown is positioned against it */
+.search-container{pointer-events:all;flex:1;min-width:0;position:relative;}
+
+.search-wrap{
+  background:var(--glass);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  border:1px solid var(--glass-border);border-radius:var(--r);box-shadow:var(--shadow);
+  display:flex;align-items:center;height:46px;padding:0 6px 0 14px;
+  transition:border-color .2s,box-shadow .2s,border-radius .15s;
+  position:relative;z-index:2;
+}
+.search-wrap.open{
+  border-radius:var(--r) var(--r) 0 0;
+  border-bottom-color:transparent;
+  box-shadow:var(--shadow),0 0 0 3px rgba(26,115,232,.1);
+}
+.search-wrap:focus-within:not(.open){
+  border-color:rgba(26,115,232,.4);
+  box-shadow:var(--shadow),0 0 0 3px rgba(26,115,232,.1);
+}
+.search-wrap input{
+  flex:1;min-width:0;border:none;outline:none;
+  font-family:'Inter',sans-serif;font-size:.875rem;font-weight:500;
+  color:var(--text);background:transparent;
+}
+.search-wrap input::placeholder{color:var(--muted);font-weight:400;}
+.search-btn{
+  background:var(--accent);border:none;color:#fff;
+  width:33px;height:33px;border-radius:var(--r-sm);
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:background .15s,transform .1s;flex-shrink:0;
+}
+.search-btn:hover{background:#1558b0;}
+.search-btn:active{transform:scale(.93);}
+.search-btn svg{width:15px;height:15px;}
+
+/* ── AUTOCOMPLETE DROPDOWN ── */
+.suggestions{
+  position:absolute;top:calc(100% - 1px);left:0;right:0;z-index:1;
+  background:var(--glass-strong);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  border:1px solid rgba(26,115,232,.3);border-top:none;
+  border-radius:0 0 var(--r) var(--r);
+  box-shadow:var(--shadow-lg);
+  overflow:hidden;
+  max-height:280px;overflow-y:auto;
+  scrollbar-width:thin;scrollbar-color:var(--divider) transparent;
+  display:none;
+}
+.suggestions.show{display:block;}
+.sug-item{
+  display:flex;align-items:center;gap:11px;
+  padding:10px 14px;cursor:pointer;
+  transition:background .12s;
+  border-bottom:1px solid var(--divider);
+}
+.sug-item:last-child{border-bottom:none;}
+.sug-item:hover,.sug-item.active{background:var(--accent-soft);}
+.sug-icon{
+  width:32px;height:32px;border-radius:8px;flex-shrink:0;
+  background:var(--accent-soft);display:flex;align-items:center;justify-content:center;
+}
+.sug-icon svg{width:15px;height:15px;color:var(--accent);}
+.sug-text{flex:1;min-width:0;}
+.sug-name{font-size:.82rem;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.sug-sub{font-size:.7rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.sug-type{
+  font-size:.62rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--accent);background:var(--accent-soft);padding:2px 7px;border-radius:20px;flex-shrink:0;
+}
+
+/* ── RIGHT CONTROLS ── */
+.controls{
+  position:fixed;right:14px;top:50%;transform:translateY(-50%);
+  z-index:1000;display:flex;flex-direction:column;gap:8px;
+  transition:right .35s ease;
+}
+body.panel-open .controls{right:calc(var(--panel-w) + 14px);}
+
+.ctrl-pill{
+  background:var(--glass);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  border:1px solid var(--glass-border);border-radius:var(--r);box-shadow:var(--shadow);
+  overflow:hidden;display:flex;flex-direction:column;
+}
+.ctrl-btn{
+  width:44px;height:44px;border:none;background:transparent;
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:background .15s;color:var(--text);position:relative;
+}
+.ctrl-btn+.ctrl-btn{border-top:1px solid var(--divider);}
+.ctrl-btn:hover{background:rgba(26,115,232,.08);}
+.ctrl-btn.active{background:var(--accent);color:#fff;}
+.ctrl-btn svg{width:18px;height:18px;}
+.ctrl-btn::after{
+  content:attr(data-tip);position:absolute;right:calc(100% + 10px);
+  background:rgba(28,30,34,.88);backdrop-filter:blur(8px);
+  color:#fff;font-size:.7rem;font-weight:600;padding:5px 10px;
+  border-radius:8px;white-space:nowrap;opacity:0;pointer-events:none;
+  transition:opacity .15s;
+}
+.ctrl-btn:hover::after{opacity:1;}
+
+/* ── LAYER PANEL ── */
+.layer-panel{
+  position:fixed;right:70px;bottom:60px;z-index:1001;
+  background:var(--glass-strong);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  border:1px solid var(--glass-border);border-radius:var(--r);box-shadow:var(--shadow-lg);
+  padding:14px;display:none;gap:10px;
+}
+.layer-panel.open{display:flex;}
+.layer-item{display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;}
+.layer-box{
+  width:58px;height:42px;border-radius:var(--r-sm);
+  border:2px solid transparent;display:flex;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.05);transition:border-color .15s,transform .12s;
+}
+.layer-box:hover{transform:scale(1.04);}
+.layer-box.active{border-color:var(--accent);background:var(--accent-soft);}
+.layer-box svg{width:20px;height:20px;color:var(--muted);}
+.layer-box.active svg{color:var(--accent);}
+.layer-label{font-size:.67rem;font-weight:600;color:var(--muted);}
+
+/* ── PLACE INFO PANEL ── */
+.place-panel{
+  position:fixed;top:0;right:0;bottom:0;width:var(--panel-w);
+  z-index:999;
+  background:var(--glass-strong);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  border-left:1px solid var(--glass-border);
+  box-shadow:-8px 0 40px rgba(0,0,0,.12);
+  display:flex;flex-direction:column;
+  transform:translateX(100%);transition:transform .35s cubic-bezier(.4,0,.2,1);
+  overflow:hidden;
+}
+.place-panel.open{transform:translateX(0);}
+
+.panel-close{
+  position:absolute;top:14px;right:14px;z-index:2;
+  width:32px;height:32px;border-radius:50%;
+  background:rgba(0,0,0,.07);border:none;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:background .15s;
+}
+.panel-close:hover{background:rgba(0,0,0,.15);}
+.panel-close svg{width:16px;height:16px;color:var(--text);}
+
+/* photo gallery */
+.panel-photos{
+  width:100%;height:200px;flex-shrink:0;
+  position:relative;overflow:hidden;background:#e8eaed;
+}
+.panel-photos img{
+  position:absolute;inset:0;width:100%;height:100%;
+  object-fit:cover;opacity:0;transition:opacity .4s;
+}
+.panel-photos img.active{opacity:1;}
+.photo-dots{
+  position:absolute;bottom:10px;left:50%;transform:translateX(-50%);
+  display:flex;gap:5px;
+}
+.photo-dot{
+  width:6px;height:6px;border-radius:50%;
+  background:rgba(255,255,255,.6);cursor:pointer;transition:background .15s;
+  border:none;
+}
+.photo-dot.active{background:#fff;}
+.photo-prev,.photo-next{
+  position:absolute;top:50%;transform:translateY(-50%);
+  width:32px;height:32px;border-radius:50%;
+  background:rgba(255,255,255,.75);backdrop-filter:blur(8px);
+  border:none;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:background .15s;z-index:1;
+}
+.photo-prev{left:10px;} .photo-next{right:10px;}
+.photo-prev:hover,.photo-next:hover{background:rgba(255,255,255,.95);}
+.photo-prev svg,.photo-next svg{width:14px;height:14px;color:var(--text);}
+.panel-photos.no-photo{
+  display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(135deg,#e8edf5,#d4ddf0);
+}
+.panel-photos.no-photo svg{width:48px;height:48px;color:#b0bbcc;}
+
+/* panel body */
+.panel-body{flex:1;overflow-y:auto;padding:20px 20px 30px;scrollbar-width:thin;scrollbar-color:var(--divider) transparent;}
+
+.panel-type-badge{
+  display:inline-block;font-size:.65rem;font-weight:700;
+  letter-spacing:.06em;text-transform:uppercase;
+  color:var(--accent);background:var(--accent-soft);
+  padding:3px 9px;border-radius:20px;margin-bottom:8px;
+}
+.panel-name{font-size:1.3rem;font-weight:800;color:var(--text);line-height:1.2;margin-bottom:4px;}
+.panel-addr{font-size:.78rem;color:var(--muted);font-weight:500;margin-bottom:16px;line-height:1.5;}
+
+.panel-divider{height:1px;background:var(--divider);margin:16px 0;}
+
+.panel-desc{font-size:.82rem;color:#3a4050;line-height:1.65;margin-bottom:14px;}
+.panel-desc-more{
+  background:none;border:none;color:var(--accent);font-size:.78rem;font-weight:600;
+  cursor:pointer;padding:0;font-family:'Inter',sans-serif;
+}
+
+/* info rows */
+.info-grid{display:flex;flex-direction:column;gap:10px;margin-bottom:4px;}
+.info-row{display:flex;align-items:flex-start;gap:10px;}
+.info-icon{
+  width:28px;height:28px;border-radius:8px;flex-shrink:0;
+  background:var(--accent-soft);display:flex;align-items:center;justify-content:center;margin-top:1px;
+}
+.info-icon svg{width:13px;height:13px;color:var(--accent);}
+.info-label{font-size:.7rem;color:var(--muted);font-weight:500;margin-bottom:1px;}
+.info-val{font-size:.8rem;color:var(--text);font-weight:600;}
+.info-val a{color:var(--accent);text-decoration:none;}
+.info-val a:hover{text-decoration:underline;}
+
+/* panel actions */
+.panel-actions{display:flex;gap:8px;margin-top:18px;}
+.panel-action{
+  flex:1;background:var(--accent-soft);border:none;color:var(--accent);
+  font-size:.75rem;font-weight:700;padding:9px 8px;border-radius:var(--r-sm);
+  cursor:pointer;transition:background .15s;font-family:'Inter',sans-serif;
+}
+.panel-action:hover{background:rgba(26,115,232,.18);}
+.panel-action.primary{background:var(--accent);color:#fff;}
+.panel-action.primary:hover{background:#1558b0;}
+
+/* skeleton loader */
+.skeleton{background:linear-gradient(90deg,#eee 25%,#f5f5f5 50%,#eee 75%);background-size:200% 100%;animation:shimmer 1.4s infinite;}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.skel-line{height:12px;border-radius:6px;margin-bottom:8px;}
+
+/* ── BOTTOM BAR ── */
+.bottombar{
+  position:fixed;bottom:0;left:0;right:0;height:34px;
+  background:rgba(255,255,255,.78);backdrop-filter:blur(16px) saturate(160%);
+  -webkit-backdrop-filter:blur(16px) saturate(160%);
+  border-top:1px solid rgba(0,0,0,.07);z-index:1000;
+  display:flex;align-items:center;padding:0 16px;gap:18px;
+  font-size:.69rem;color:var(--muted);font-weight:500;
+  transition:right .35s ease;
+}
+body.panel-open .bottombar{right:var(--panel-w);}
+.bottombar .coords{color:var(--accent);font-weight:600;}
+.bottombar .sep{opacity:.25;}
+.bottombar .cr{margin-left:auto;}
+
+/* ── POPUP ── */
+.leaflet-popup-content-wrapper{
+  background:var(--glass-strong)!important;
+  backdrop-filter:var(--blur)!important;-webkit-backdrop-filter:var(--blur)!important;
+  border:1px solid var(--glass-border)!important;border-radius:var(--r)!important;
+  box-shadow:var(--shadow-lg)!important;padding:0!important;overflow:hidden!important;
+}
+.leaflet-popup-tip{background:rgba(255,255,255,.85)!important;box-shadow:none!important;}
+.leaflet-popup-content{margin:0!important;width:190px!important;}
+.leaflet-popup-close-button{color:var(--muted)!important;top:10px!important;right:12px!important;}
+.pop-body{padding:13px 15px 9px;}
+.pop-body h3{font-size:.86rem;font-weight:700;color:var(--text);margin-bottom:2px;}
+.pop-sub{font-size:.7rem;color:var(--muted);font-weight:500;line-height:1.4;}
+.pop-coords{font-size:.66rem;color:var(--accent);font-weight:600;margin-top:6px;}
+.pop-btns{display:flex;gap:7px;padding:7px 11px 11px;}
+.pop-btn{
+  flex:1;background:var(--accent-soft);border:none;color:var(--accent);
+  font-size:.68rem;font-weight:700;padding:6px 4px;border-radius:var(--r-sm);
+  cursor:pointer;transition:background .15s;font-family:'Inter',sans-serif;
+}
+.pop-btn:hover{background:rgba(26,115,232,.18);}
+
+/* ── MARKERS ── */
+.pin-dot{
+  width:13px;height:13px;border-radius:50%;
+  background:var(--accent);border:2.5px solid #fff;
+  box-shadow:0 2px 8px rgba(26,115,232,.45);
+}
+.pin-dot.loc{background:#ea4335;box-shadow:0 2px 8px rgba(234,67,53,.45);}
+.pin-pulse{
+  width:36px;height:36px;border-radius:50%;
+  background:rgba(26,115,232,.12);border:2px solid rgba(26,115,232,.28);
+  animation:ring 2s ease-out infinite;
+}
+@keyframes ring{0%{transform:scale(.5);opacity:1;}100%{transform:scale(1.7);opacity:0;}}
+
+/* ── ADD MODE ── */
+body.add-mode #map{cursor:crosshair!important;}
+.add-hint{
+  position:fixed;top:72px;left:50%;transform:translateX(-50%);
+  background:rgba(28,30,34,.82);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  color:#fff;font-size:.77rem;font-weight:600;padding:9px 20px;
+  border-radius:24px;z-index:2000;display:none;pointer-events:none;
+  white-space:nowrap;box-shadow:var(--shadow);
+}
+body.add-mode .add-hint{display:block;}
+
+/* ── TOAST ── */
+.toast{
+  position:fixed;bottom:46px;left:50%;
+  transform:translateX(-50%) translateY(8px);
+  background:rgba(28,30,34,.84);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  color:#fff;font-size:.77rem;font-weight:600;padding:9px 20px;
+  border-radius:24px;z-index:3000;opacity:0;transition:all .22s;
+  pointer-events:none;white-space:nowrap;box-shadow:var(--shadow);
+}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+
+/* ── LEAFLET ── */
+.leaflet-control-zoom{display:none!important;}
+.leaflet-control-attribution{display:none;}
+.leaflet-bar{border:none!important;}
+
+/* ── MOBILE ── */
+@media(max-width:640px){
+  :root{--panel-w:100vw;}
+  body.panel-open #map{right:0;}
+  body.panel-open .bottombar{right:0;}
+  body.panel-open .controls{right:14px;}
+  .topbar{top:10px;width:calc(100vw - 74px);gap:7px;}
+  .logo{display:none;}
+  .controls{right:10px;gap:6px;}
+  .ctrl-btn{width:42px;height:42px;}
+  .ctrl-btn::after{display:none;}
+  .bottombar{padding:0 12px;gap:10px;font-size:.64rem;}
+  .bottombar .coords{display:none;}
+  .layer-panel{right:10px;bottom:54px;flex-wrap:wrap;max-width:200px;}
+  .add-hint{top:64px;font-size:.72rem;}
+}
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<!-- TOPBAR -->
+<div class="topbar">
+  <div class="logo">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>
+      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+    </svg>
+    <span>WorldMap</span>
+  </div>
+  <div class="search-container">
+    <div class="search-wrap" id="search-wrap">
+      <input id="q" type="text" placeholder="Поиск города, страны, места…" autocomplete="off"/>
+      <button class="search-btn" onclick="doSearch()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+      </button>
+    </div>
+    <div class="suggestions" id="suggestions"></div>
+  </div>
+</div>
+
+<div class="add-hint">Нажмите на карту, чтобы добавить метку · ESC — отмена</div>
+
+<!-- RIGHT CONTROLS -->
+<div class="controls">
+  <div class="ctrl-pill">
+    <button class="ctrl-btn" onclick="map.zoomIn()" data-tip="Приблизить">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </button>
+    <button class="ctrl-btn" onclick="map.zoomOut()" data-tip="Отдалить">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </button>
+  </div>
+  <div class="ctrl-pill">
+    <button class="ctrl-btn" id="locate-btn" onclick="myLocation()" data-tip="Моё место">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+      </svg>
+    </button>
+  </div>
+  <div class="ctrl-pill">
+    <button class="ctrl-btn" id="add-btn" onclick="toggleAdd()" data-tip="Добавить метку">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
+      </svg>
+    </button>
+  </div>
+  <div class="ctrl-pill">
+    <button class="ctrl-btn" id="layer-btn" onclick="toggleLayers()" data-tip="Слои">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+        <polyline points="2 17 12 22 22 17"/>
+        <polyline points="2 12 12 17 22 12"/>
+      </svg>
+    </button>
+  </div>
+  <div class="ctrl-pill">
+    <button class="ctrl-btn" onclick="map.flyTo([20,0],3,{duration:1.2})" data-tip="Весь мир">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>
+        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<!-- LAYER PANEL -->
+<div class="layer-panel" id="layer-panel">
+  <div class="layer-item" data-layer="osm">
+    <div class="layer-box active" id="thumb-osm">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
+    </div>
+    <span class="layer-label">Карта</span>
+  </div>
+  <div class="layer-item" data-layer="dark">
+    <div class="layer-box" id="thumb-dark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    </div>
+    <span class="layer-label">Ночь</span>
+  </div>
+  <div class="layer-item" data-layer="sat">
+    <div class="layer-box" id="thumb-sat">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2a10 10 0 0 1 10 10M12 22A10 10 0 0 1 2 12"/><path d="m2 2 20 20"/></svg>
+    </div>
+    <span class="layer-label">Спутник</span>
+  </div>
+  <div class="layer-item" data-layer="topo">
+    <div class="layer-box" id="thumb-topo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 3 4 8 5-5 5 15H2L8 3z"/></svg>
+    </div>
+    <span class="layer-label">Рельеф</span>
+  </div>
+</div>
+
+<!-- PLACE INFO PANEL -->
+<div class="place-panel" id="place-panel">
+  <button class="panel-close" onclick="closePanel()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+  </button>
+  <div class="panel-photos" id="panel-photos">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
+      <polyline points="21 15 16 10 5 21"/>
+    </svg>
+  </div>
+  <div class="panel-body" id="panel-body">
+    <!-- filled by JS -->
+  </div>
+</div>
+
+<!-- BOTTOM BAR -->
+<div class="bottombar">
+  <span id="coords" class="coords">lat: —— &nbsp;lng: ——</span>
+  <span class="sep">|</span>
+  <span id="zoom-info">Zoom: 3</span>
+  <span class="sep">|</span>
+  <span id="pin-count">Меток: 0</span>
+  <span class="cr">© OpenStreetMap</span>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ── MAP ──
+const map = L.map('map',{center:[20,0],zoom:3,zoomControl:false,minZoom:2,maxZoom:19,worldCopyJump:true});
+const tiles={
+  osm:  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'),
+  dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'),
+  sat:  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'),
+  topo: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png'),
+};
+tiles.osm.addTo(map);
+let cur='osm';
+
+// ── ICONS ──
+const pinIcon=(loc=false)=>L.divIcon({className:'',html:`<div class="pin-dot${loc?' loc':''}"></div>`,iconSize:[13,13],iconAnchor:[6,6],popupAnchor:[0,-10]});
+const pulseIcon=L.divIcon({className:'',html:'<div class="pin-pulse"></div>',iconSize:[36,36],iconAnchor:[18,18]});
+
+let pinCount=0;
+function addPin(lat,lng,name,sub='',loc=false){
+  const m=L.marker([lat,lng],{icon:pinIcon(loc)}).addTo(map);
+  m.bindPopup(`<div class="pop-body"><h3>${name}</h3>${sub?`<div class="pop-sub">${sub}</div>`:''}<div class="pop-coords">${(+lat).toFixed(5)}, ${(+lng).toFixed(5)}</div></div><div class="pop-btns"><button class="pop-btn" onclick="copyC(${lat},${lng})">Копировать</button><button class="pop-btn" onclick="window.open('https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=15/${lat}/${lng}','_blank')">OSM</button></div>`,{maxWidth:220});
+  document.getElementById('pin-count').textContent=`Меток: ${++pinCount}`;
+  return m;
+}
+
+// ── MAP EVENTS ──
+map.on('mousemove',e=>{
+  document.getElementById('coords').textContent=`lat: ${e.latlng.lat.toFixed(4)}  lng: ${e.latlng.lng.toFixed(4)}`;
+});
+map.on('zoomend',()=>{ document.getElementById('zoom-info').textContent=`Zoom: ${map.getZoom()}`; });
+
+// ── ADD MODE ──
+let addMode=false;
+function toggleAdd(){
+  addMode=!addMode;
+  document.body.classList.toggle('add-mode',addMode);
+  document.getElementById('add-btn').classList.toggle('active',addMode);
+}
+map.on('click',e=>{
+  if(!addMode)return;
+  const n=prompt('Название метки:','Моё место')||'Метка';
+  addPin(e.latlng.lat,e.latlng.lng,n,'',true).openPopup();
+  toast(`«${n}» добавлено`);
+  toggleAdd();
+});
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ if(addMode)toggleAdd(); closeSug(); } });
+
+// ── LAYERS ──
+document.querySelectorAll('.layer-item').forEach(el=>{
+  el.addEventListener('click',()=>{
+    const name=el.dataset.layer;
+    if(cur===name){closeLayers();return;}
+    tiles[cur].remove();tiles[name].addTo(map);cur=name;
+    document.querySelectorAll('.layer-box').forEach(b=>b.classList.remove('active'));
+    document.getElementById('thumb-'+name).classList.add('active');
+    closeLayers();
+  });
+});
+function toggleLayers(){
+  const p=document.getElementById('layer-panel');
+  const open=p.classList.toggle('open');
+  document.getElementById('layer-btn').classList.toggle('active',open);
+}
+function closeLayers(){
+  document.getElementById('layer-panel').classList.remove('open');
+  document.getElementById('layer-btn').classList.remove('active');
+}
+document.addEventListener('click',e=>{
+  const p=document.getElementById('layer-panel'),b=document.getElementById('layer-btn');
+  if(p.classList.contains('open')&&!p.contains(e.target)&&!b.contains(e.target))closeLayers();
+});
+
+// ── AUTOCOMPLETE ──
+const qEl=document.getElementById('q');
+const sugEl=document.getElementById('suggestions');
+const swEl=document.getElementById('search-wrap');
+let sugDebounce,sugResults=[],sugIdx=-1;
+
+qEl.addEventListener('input',()=>{
+  clearTimeout(sugDebounce);
+  const v=qEl.value.trim();
+  if(v.length<2){closeSug();return;}
+  sugDebounce=setTimeout(()=>fetchSuggestions(v),280);
+});
+qEl.addEventListener('keydown',e=>{
+  if(e.key==='ArrowDown'){e.preventDefault();moveSug(1);}
+  else if(e.key==='ArrowUp'){e.preventDefault();moveSug(-1);}
+  else if(e.key==='Enter'){
+    if(sugIdx>=0&&sugResults[sugIdx]){selectSug(sugResults[sugIdx]);}
+    else doSearch();
+    closeSug();
+  }
+  else if(e.key==='Escape')closeSug();
+});
+
+async function fetchSuggestions(q){
+  try{
+    const r=await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=6&accept-language=ru&addressdetails=1`);
+    const d=await r.json();
+    sugResults=d;
+    renderSug(d);
+  }catch{}
+}
+
+function typeLabel(t){
+  const m={city:'Город',town:'Город',village:'Деревня',country:'Страна',state:'Регион',
+    county:'Район',suburb:'Район',neighbourhood:'Район',
+    museum:'Музей',hotel:'Отель',restaurant:'Ресторан',
+    airport:'Аэропорт',station:'Станция',park:'Парк',
+    mountain:'Гора',lake:'Озеро',river:'Река',island:'Остров',
+    historic:'Историческое',tourism:'Туризм',amenity:'Место'};
+  return m[t]||t||'Место';
+}
+
+function renderSug(list){
+  if(!list.length){closeSug();return;}
+  sugIdx=-1;
+  sugEl.innerHTML=list.map((it,i)=>{
+    const name=it.display_name.split(',')[0];
+    const sub=it.display_name.split(',').slice(1,3).join(',').trim();
+    const type=typeLabel(it.type||it.class);
+    return `<div class="sug-item" data-i="${i}">
+      <div class="sug-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></div>
+      <div class="sug-text"><div class="sug-name">${name}</div><div class="sug-sub">${sub}</div></div>
+      <span class="sug-type">${type}</span>
+    </div>`;
+  }).join('');
+  sugEl.querySelectorAll('.sug-item').forEach(el=>{
+    el.addEventListener('click',()=>{ selectSug(sugResults[+el.dataset.i]); });
+    el.addEventListener('mouseenter',()=>{ sugIdx=+el.dataset.i; highlightSug(); });
+  });
+  sugEl.classList.add('show');
+  swEl.classList.add('open');
+}
+
+function moveSug(dir){
+  sugIdx=Math.max(-1,Math.min(sugResults.length-1,sugIdx+dir));
+  highlightSug();
+}
+function highlightSug(){
+  sugEl.querySelectorAll('.sug-item').forEach((el,i)=>el.classList.toggle('active',i===sugIdx));
+}
+function closeSug(){
+  sugEl.classList.remove('show');
+  swEl.classList.remove('open');
+  sugIdx=-1;
+}
+
+function selectSug(item){
+  const name=item.display_name.split(',')[0];
+  qEl.value=name;
+  closeSug();
+  const lat=+item.lat,lon=+item.lon;
+  const zoom=item.type==='country'?5:item.type==='city'||item.type==='town'?11:13;
+  map.flyTo([lat,lon],zoom,{duration:1.4});
+  const m=addPin(lat,lon,name,item.display_name.split(',').slice(1,3).join(',').trim());
+  setTimeout(()=>m.openPopup(),1500);
+  openPlacePanel(item);
+}
+
+async function doSearch(){
+  const q=qEl.value.trim();
+  if(!q)return;
+  closeSug();
+  toast('Поиск…');
+  try{
+    const r=await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1&accept-language=ru&addressdetails=1`);
+    const d=await r.json();
+    if(!d.length){toast('Не найдено');return;}
+    selectSug(d[0]);
+  }catch{toast('Ошибка поиска');}
+}
+
+// ── PLACE PANEL ──
+async function openPlacePanel(item){
+  document.body.classList.add('panel-open');
+  document.getElementById('place-panel').classList.add('open');
+
+  // skeleton
+  document.getElementById('panel-body').innerHTML=`
+    <div class="skel-line skeleton" style="width:60px;height:20px;margin-bottom:10px;border-radius:10px;"></div>
+    <div class="skel-line skeleton" style="width:80%;height:26px;"></div>
+    <div class="skel-line skeleton" style="width:90%;"></div>
+    <div class="skel-line skeleton" style="width:70%;margin-bottom:20px;"></div>
+    <div class="skel-line skeleton" style="width:100%;height:10px;"></div>
+    <div class="skel-line skeleton" style="width:100%;height:10px;"></div>
+    <div class="skel-line skeleton" style="width:80%;height:10px;"></div>`;
+  resetPhotos();
+
+  const name=item.display_name.split(',')[0];
+  const addr=item.address||{};
+
+  // fetch Wikipedia info
+  let wikiData=null;
+  try{
+    const lang='ru';
+    const ws=await fetch(`https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(name)}`);
+    if(ws.ok) wikiData=await ws.json();
+    // fallback to English
+    if(!wikiData||wikiData.type==='disambiguation'){
+      const we=await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(name)}`);
+      if(we.ok) wikiData=await we.json();
+    }
+  }catch{}
+
+  // photos: wiki thumbnail + Wikimedia commons search
+  const photos=[];
+  if(wikiData?.thumbnail?.source) photos.push(wikiData.thumbnail.source);
+  // additional photos from Wikimedia
+  try{
+    const wm=await fetch(`https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(name)}&gsrnamespace=6&gsrlimit=5&prop=imageinfo&iiprop=url|thumburl&iiurlwidth=600&format=json&origin=*`);
+    const wmj=await wm.json();
+    const pages=wmj?.query?.pages||{};
+    Object.values(pages).forEach(p=>{
+      const url=p?.imageinfo?.[0]?.thumburl||p?.imageinfo?.[0]?.url;
+      if(url&&!url.includes('.svg')&&!url.includes('.ogg')&&photos.length<5) photos.push(url);
+    });
+  }catch{}
+
+  renderPhotos(photos);
+
+  // build address string
+  const addrParts=[addr.road,addr.city||addr.town||addr.village,addr.state,addr.country].filter(Boolean);
+  const addrStr=addrParts.length?addrParts.join(', '):item.display_name;
+
+  const type=typeLabel(item.type||item.class);
+  const desc=wikiData?.extract||'';
+  const shortDesc=desc.length>300?desc.slice(0,300)+'…':desc;
+  const wikiUrl=wikiData?.content_urls?.desktop?.page||'';
+  const coords=`${(+item.lat).toFixed(5)}, ${(+item.lon).toFixed(5)}`;
+
+  document.getElementById('panel-body').innerHTML=`
+    <span class="panel-type-badge">${type}</span>
+    <div class="panel-name">${name}</div>
+    <div class="panel-addr">${addrStr}</div>
+
+    ${desc?`<div class="panel-divider"></div>
+    <div class="panel-desc" id="pdesc">${shortDesc}</div>
+    ${desc.length>300?`<button class="panel-desc-more" onclick="expandDesc(${JSON.stringify(desc).replace(/"/g,'&quot;')})">Читать далее →</button>`:''}`:'' }
+
+    <div class="panel-divider"></div>
+    <div class="info-grid">
+      <div class="info-row">
+        <div class="info-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></div>
+        <div><div class="info-label">Координаты</div><div class="info-val">${coords}</div></div>
+      </div>
+      ${addr.country?`<div class="info-row">
+        <div class="info-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></div>
+        <div><div class="info-label">Страна</div><div class="info-val">${addr.country}</div></div>
+      </div>`:''}
+      ${addr.state?`<div class="info-row">
+        <div class="info-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></div>
+        <div><div class="info-label">Регион</div><div class="info-val">${addr.state}</div></div>
+      </div>`:''}
+      ${wikiUrl?`<div class="info-row">
+        <div class="info-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></div>
+        <div><div class="info-label">Wikipedia</div><div class="info-val"><a href="${wikiUrl}" target="_blank">${name}</a></div></div>
+      </div>`:''}
+    </div>
+
+    <div class="panel-actions">
+      <button class="panel-action" onclick="copyC(${item.lat},${item.lon})">Скопировать координаты</button>
+      <button class="panel-action primary" onclick="window.open('https://www.openstreetmap.org/?mlat=${item.lat}&mlon=${item.lon}#map=15/${item.lat}/${item.lon}','_blank')">Открыть OSM</button>
+    </div>`;
+}
+
+function expandDesc(full){
+  document.getElementById('pdesc').textContent=full;
+  event.target.remove();
+}
+
+function closePanel(){
+  document.body.classList.remove('panel-open');
+  document.getElementById('place-panel').classList.remove('open');
+}
+
+// ── PHOTOS ──
+let photoIdx=0,photoList=[];
+function resetPhotos(){
+  photoIdx=0;photoList=[];
+  const ph=document.getElementById('panel-photos');
+  ph.innerHTML='';
+  ph.className='panel-photos no-photo';
+  ph.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>';
+}
+function renderPhotos(urls){
+  if(!urls.length)return;
+  photoList=urls;photoIdx=0;
+  const ph=document.getElementById('panel-photos');
+  ph.className='panel-photos';
+  ph.innerHTML='';
+  urls.forEach((u,i)=>{
+    const img=document.createElement('img');
+    img.src=u;img.alt='';img.className=i===0?'active':'';
+    img.onerror=()=>img.remove();
+    ph.appendChild(img);
+  });
+  if(urls.length>1){
+    // dots
+    const dots=document.createElement('div');dots.className='photo-dots';
+    urls.forEach((_,i)=>{
+      const d=document.createElement('button');d.className='photo-dot'+(i===0?' active':'');
+      d.onclick=()=>goPhoto(i);dots.appendChild(d);
+    });
+    ph.appendChild(dots);
+    // arrows
+    const prev=document.createElement('button');prev.className='photo-prev';
+    prev.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="15 18 9 12 15 6"/></svg>';
+    prev.onclick=()=>goPhoto(photoIdx-1);
+    const next=document.createElement('button');next.className='photo-next';
+    next.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>';
+    next.onclick=()=>goPhoto(photoIdx+1);
+    ph.appendChild(prev);ph.appendChild(next);
+  }
+}
+function goPhoto(i){
+  const imgs=[...document.querySelectorAll('#panel-photos img')];
+  const dots=[...document.querySelectorAll('.photo-dot')];
+  if(!imgs.length)return;
+  photoIdx=(i+imgs.length)%imgs.length;
+  imgs.forEach((im,j)=>im.classList.toggle('active',j===photoIdx));
+  dots.forEach((d,j)=>d.classList.toggle('active',j===photoIdx));
+}
+
+// ── LOCATION ──
+let pulseMark=null;
+function myLocation(){
+  const btn=document.getElementById('locate-btn');btn.classList.add('active');
+  navigator.geolocation.getCurrentPosition(
+    pos=>{
+      const{latitude:lat,longitude:lng}=pos.coords;
+      if(pulseMark)pulseMark.remove();
+      pulseMark=L.marker([lat,lng],{icon:pulseIcon,zIndexOffset:-100}).addTo(map);
+      map.flyTo([lat,lng],14,{duration:1.5});
+      addPin(lat,lng,'Вы здесь','Текущее местоположение',true);
+      toast('Местоположение найдено');btn.classList.remove('active');
+    },
+    ()=>{ toast('Геолокация недоступна');btn.classList.remove('active'); }
+  );
+}
+
+// ── UTILS ──
+function typeLabel(t){
+  const m={city:'Город',town:'Город',village:'Деревня',country:'Страна',state:'Регион',
+    county:'Район',suburb:'Район',neighbourhood:'Район',museum:'Музей',hotel:'Отель',
+    restaurant:'Ресторан',airport:'Аэропорт',station:'Станция',park:'Парк',
+    mountain:'Гора',lake:'Озеро',river:'Река',island:'Остров',historic:'Историческое',
+    tourism:'Туризм',amenity:'Место'};
+  return m[t]||t||'Место';
+}
+function copyC(lat,lng){
+  navigator.clipboard?.writeText(`${(+lat).toFixed(5)}, ${(+lng).toFixed(5)}`).then(()=>toast('Координаты скопированы'));
+}
+let tt;
+function toast(msg){
+  const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');
+  clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('show'),2800);
+}
+
+// close suggestions on outside click
+document.addEventListener('click',e=>{
+  if(!document.getElementById('search-wrap').contains(e.target)) closeSug();
+});
+</script>
+</body>
+</html>
